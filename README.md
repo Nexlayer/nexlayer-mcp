@@ -42,6 +42,21 @@ This MCP server provides 14 essential tools for complete application deployment 
 
 ## Installation
 
+### Cursor IDE
+
+Add to your `cursor-mcp-config.json`:
+
+```json
+{
+  "mcpServers": {
+    "nexlayer": {
+      "command": "npx",
+      "args": ["nexlayer-mcp@latest"]
+    }
+  }
+}
+```
+
 ### Claude Desktop
 
 Add to your `claude_desktop_config.json`:
@@ -60,21 +75,6 @@ Add to your `claude_desktop_config.json`:
 **Configuration file locations:**
 - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-
-### Cursor IDE
-
-Add to your `cursor-mcp-config.json`:
-
-```json
-{
-  "mcpServers": {
-    "nexlayer": {
-      "command": "npx",
-      "args": ["nexlayer-mcp@latest"]
-    }
-  }
-}
-```
 
 ### Other AI Clients
 
