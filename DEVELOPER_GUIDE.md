@@ -785,33 +785,7 @@ npm run lint     # Check code quality
 npm run build    # Verify build
 ```
 
-### Pull Request Process
-
-1. **Branch**: Create feature branch from `main`
-2. **Implement**: Follow coding standards and patterns
-3. **Test**: Add tests for new functionality
-4. **Document**: Update relevant documentation
-5. **Review**: Submit PR with clear description
-6. **Merge**: After approval and CI validation
-
-### Code Review Checklist
-
-- [ ] Follows MCP TypeScript SDK patterns
-- [ ] Includes comprehensive error handling
-- [ ] Returns structured data for AI agents
-- [ ] Implements proper logging and tracing
-- [ ] Sanitizes sensitive parameters
-- [ ] Includes unit tests
-- [ ] Updates documentation
-- [ ] Follows security best practices
-
 ### Architecture Decisions
-
-**Why 9 Tools?**
-- **CTO Requirement**: Simplified from 22 tools (68% reduction)
-- **Essential Only**: Covers complete 6-step deployment workflow
-- **Deployment Management**: Added extend/claim for production use
-- **Maintainable**: Clear boundaries and responsibilities
 
 **Why Modular Structure?**
 - **Scalability**: Easy to add new tool categories
