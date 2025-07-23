@@ -160,6 +160,7 @@ pods:`;
       pods.push({
         name: `${appName}-frontend`,
         image: `ttl.sh/${appName}-frontend:1h`,
+        path: '/', // Required field for frontend routing
         servicePorts: [frontend.port || 3000]
       });
     }
@@ -167,6 +168,7 @@ pods:`;
       pods.push({
         name: `${appName}-backend`,
         image: `ttl.sh/${appName}-backend:1h`,
+        // No path field for backend services
         servicePorts: [backend.port || 8000]
       });
     }

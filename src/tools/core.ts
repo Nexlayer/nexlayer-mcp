@@ -72,7 +72,23 @@ export class CoreTools {
 
         try {
           const client = this.getClient(params.sessionToken);
-          const yamlContent = params.yamlContent;
+          let yamlContent = params.yamlContent;
+          
+          // Handle case where AI client sends JSON object with embedded YAML
+          if (typeof yamlContent === 'object' && yamlContent !== null) {
+            // Extract YAML content from JSON object
+            if (yamlContent.yamlContent) {
+              yamlContent = yamlContent.yamlContent;
+            } else if (yamlContent.yaml) {
+              yamlContent = yamlContent.yaml;
+            } else if (yamlContent.content) {
+              yamlContent = yamlContent.content;
+            } else {
+              // Try to stringify the object as YAML
+              const yaml = await import('yaml');
+              yamlContent = yaml.stringify(yamlContent);
+            }
+          }
           
           // Validate that YAML content is provided
           if (!yamlContent || yamlContent.trim() === '') {
@@ -104,6 +120,15 @@ export class CoreTools {
             yamlContent, 
             sessionToken: params.sessionToken 
           });
+          
+          // Validate result before proceeding
+          if (!result) {
+            throw new Error('No response received from Nexlayer API');
+          }
+          
+          if (!result.applicationName) {
+            throw new Error('Invalid response from Nexlayer API: missing applicationName');
+          }
           
           this.logger.info('Deployment completed successfully', {
             sessionId,

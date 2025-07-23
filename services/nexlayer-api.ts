@@ -44,18 +44,78 @@ export class NexlayerApiClient {
   // Start a user deployment with YAML
   async startUserDeployment(params: StartDeploymentParams): Promise<DeploymentResult> {
     try {
+      // Debug logging
+      process.stderr.write(`[NEXLAYER-API] Sending deployment request\n`);
+      process.stderr.write(`[NEXLAYER-API] YAML Content Length: ${params.yamlContent.length}\n`);
+      process.stderr.write(`[NEXLAYER-API] YAML Content Preview: ${params.yamlContent.substring(0, 200)}...\n`);
+      process.stderr.write(`[NEXLAYER-API] Session Token: ${params.sessionToken ? 'Present' : 'None'}\n`);
+      
+      // Send YAML content directly in request body
       const response = await this.client.post<NexlayerApiResponse<DeploymentResult>>('/startUserDeployment', 
         params.yamlContent,
         {
           headers: {
-            'Content-Type': 'text/x-yaml',
+            'Content-Type': 'text/yaml',
           },
+          params: {
+            sessionToken: params.sessionToken
+          }
         }
       );
 
-      return response.data.data!;
+      // Debug logging
+      process.stderr.write(`[NEXLAYER-API] Response Status: ${response.status}\n`);
+      process.stderr.write(`[NEXLAYER-API] Response Data: ${JSON.stringify(response.data)}\n`);
+
+      // Check if response exists
+      if (!response.data) {
+        throw new Error('No response data received from Nexlayer API');
+      }
+
+      // Handle different response formats
+      const responseData = response.data;
+      
+      // Check if this is a success response with data
+      if (responseData.data) {
+        return responseData.data;
+      }
+      
+      // Check if this is a success response without nested data
+      if (responseData.success !== false && !responseData.error) {
+        // This might be a direct success response
+        return responseData as unknown as DeploymentResult;
+      }
+      
+      // Check if this is an error response
+      if (responseData.error || responseData.message) {
+        const errorMsg = responseData.error || responseData.message || 'Unknown error';
+        process.stderr.write(`[NEXLAYER-API] API Error: ${errorMsg}\n`);
+        throw new Error(`API Error: ${errorMsg}`);
+      }
+      
+      // If we get here, assume it's a success response
+      return responseData as unknown as DeploymentResult;
     } catch (error: any) {
-      throw new Error(`Failed to start deployment: ${error.response?.data?.error || error.message}`);
+      // Enhanced error handling with detailed logging
+      process.stderr.write(`[NEXLAYER-API] Error occurred: ${error.message}\n`);
+      
+      if (error.response) {
+        // HTTP error response
+        const errorData = error.response.data;
+        const statusCode = error.response.status;
+        const errorMessage = errorData?.error || errorData?.message || error.message;
+        
+        process.stderr.write(`[NEXLAYER-API] HTTP ${statusCode}: ${JSON.stringify(errorData)}\n`);
+        throw new Error(`Failed to start deployment (HTTP ${statusCode}): ${errorMessage}`);
+      } else if (error.request) {
+        // Network error
+        process.stderr.write(`[NEXLAYER-API] Network error: ${error.message}\n`);
+        throw new Error(`Network error: Unable to reach Nexlayer API (${error.message})`);
+      } else {
+        // Other error
+        process.stderr.write(`[NEXLAYER-API] Other error: ${error.message}\n`);
+        throw new Error(`Deployment error: ${error.message}`);
+      }
     }
   }
 
@@ -192,6 +252,11 @@ export class NexlayerApiClient {
     yaml.application.pods.forEach((pod) => {
       yamlString += `    - name: "${pod.name}"\n`;
       yamlString += `      image: "${pod.image}"\n`;
+      
+      // Only add path for frontend services
+      if (pod.path) {
+        yamlString += `      path: "${pod.path}"\n`;
+      }
       
       if (pod.servicePorts && pod.servicePorts.length > 0) {
         yamlString += `      servicePorts:\n`;

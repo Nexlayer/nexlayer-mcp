@@ -16,6 +16,7 @@ export interface NexlayerYaml {
 export interface PodConfig {
   name: string;
   image: string;
+  path?: string; // Required for frontend pods, optional for backend
   servicePorts?: number[];
   vars?: Record<string, string>;
   secrets?: SecretConfig[];

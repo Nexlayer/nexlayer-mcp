@@ -371,6 +371,16 @@ CMD ["npm", "start"]`;
   }
 
   /**
+   * Clean image URL by removing SHA hash digest
+   * @param imageUrl - The image URL that may contain SHA hash
+   * @returns Clean image URL without SHA hash
+   */
+  private cleanImageUrl(imageUrl: string): string {
+    // Remove SHA hash if present (format: image:tag@sha256:hash)
+    return imageUrl.split('@')[0];
+  }
+
+  /**
    * Generate configuration from Nexlayer schema (schema-driven approach)
    */
   private generateConfigFromSchema(schema: any, data: any) {
@@ -387,10 +397,14 @@ CMD ["npm", "start"]`;
           pods: builtImages.map((image: any) => {
             const pod: any = {
               name: image.serviceName || applicationName,
-              image: image.imageUrl,
-              path: '/', // Required by Nexlayer
+              image: this.cleanImageUrl(image.imageUrl),
               servicePorts: [image.port || 3000]
             };
+            
+            // Only add path field for frontend services (client)
+            if (image.serviceName === 'client' || image.serviceName?.includes('frontend')) {
+              pod.path = '/';
+            }
             
             // Add environment variables if provided
             if (Object.keys(environmentVariables).length > 0) {
@@ -414,16 +428,24 @@ CMD ["npm", "start"]`;
     return {
       application: {
         name: applicationName,
-        pods: builtImages.length > 0 ? builtImages.map((image: any) => ({
-          name: image.serviceName || applicationName,
-          image: image.imageUrl,
-          path: '/', // Required field for Nexlayer routing
-          servicePorts: [image.port || 3000],
-          ...(Object.keys(environmentVariables).length > 0 && { vars: environmentVariables })
-        })) : [{
+        pods: builtImages.length > 0 ? builtImages.map((image: any) => {
+          const pod: any = {
+            name: image.serviceName || applicationName,
+            image: this.cleanImageUrl(image.imageUrl),
+            servicePorts: [image.port || 3000],
+            ...(Object.keys(environmentVariables).length > 0 && { vars: environmentVariables })
+          };
+          
+          // Only add path field for frontend services (client)
+          if (image.serviceName === 'client' || image.serviceName?.includes('frontend')) {
+            pod.path = '/';
+          }
+          
+          return pod;
+        }) : [{
           name: applicationName,
           image: 'nginx:latest',
-          path: '/', // Required field for Nexlayer routing
+          path: '/', // Required field for Nexlayer routing (fallback is frontend)
           servicePorts: [3000]
         }]
       }

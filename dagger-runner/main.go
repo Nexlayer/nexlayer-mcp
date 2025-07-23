@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"dagger.io/dagger"
@@ -15,19 +16,19 @@ import (
 
 // BuildResult represents the output of the build process
 type BuildResult struct {
-	Client     string            `json:"client,omitempty"`
-	Server     string            `json:"server,omitempty"`
-	Ports      map[string]int    `json:"ports"`
-	Error      string            `json:"error,omitempty"`
-	DAGSummary string            `json:"dagSummary,omitempty"`
-	LLMInsights string           `json:"llmInsights,omitempty"`
+	Client      string         `json:"client,omitempty"`
+	Server      string         `json:"server,omitempty"`
+	Ports       map[string]int `json:"ports"`
+	Error       string         `json:"error,omitempty"`
+	DAGSummary  string         `json:"dagSummary,omitempty"`
+	LLMInsights string         `json:"llmInsights,omitempty"`
 }
 
 // ServiceConfig holds configuration for a service to be built
 type ServiceConfig struct {
-	Name         string
-	Path         string
-	Port         int
+	Name             string
+	Path             string
+	Port             int
 	DockerfileExists bool
 }
 
@@ -43,7 +44,7 @@ func main() {
 	repoPath := os.Args[1]
 	llmOptimize := false
 	llmProvider := "openai"
-	
+
 	// Parse optional arguments
 	for i := 2; i < len(os.Args); i++ {
 		arg := os.Args[i]
@@ -53,7 +54,7 @@ func main() {
 			llmProvider = strings.Split(arg, "=")[1]
 		}
 	}
-	
+
 	// Validate repo path exists
 	if _, err := os.Stat(repoPath); os.IsNotExist(err) {
 		result := BuildResult{
@@ -64,7 +65,7 @@ func main() {
 	}
 
 	ctx := context.Background()
-	
+
 	// Initialize Dagger client
 	client, err := dagger.Connect(ctx, dagger.WithLogOutput(os.Stderr))
 	if err != nil {
@@ -77,10 +78,10 @@ func main() {
 	defer client.Close()
 
 	log.Printf("🔍 Analyzing repository structure at: %s", repoPath)
-	
+
 	// Analyze repository structure
 	services := analyzeRepository(repoPath)
-	
+
 	if len(services) == 0 {
 		result := BuildResult{
 			Error: "No buildable services found (client/ or server/ directories)",
@@ -91,23 +92,23 @@ func main() {
 	}
 
 	log.Printf("📦 Found %d services to build", len(services))
-	
+
 	// Generate DAG summary for LLM analysis
 	dagSummary := generateDAGSummary(services)
-	
+
 	// LLM-aware DAG optimization (if enabled)
 	var llmInsights string
 	if llmOptimize {
 		llmInsights = performLLMDAGAnalysis(ctx, repoPath, services, llmProvider)
 	}
-	
+
 	// Build and push images
 	result := buildAndPushImages(ctx, client, repoPath, services)
 	result.DAGSummary = dagSummary
 	result.LLMInsights = llmInsights
-	
+
 	outputResult(result)
-	
+
 	if result.Error != "" {
 		os.Exit(1)
 	}
@@ -116,51 +117,87 @@ func main() {
 // analyzeRepository scans the repo for buildable services
 func analyzeRepository(repoPath string) []ServiceConfig {
 	var services []ServiceConfig
-	
+
 	// Check for client directory
 	clientPath := filepath.Join(repoPath, "client")
 	if stat, err := os.Stat(clientPath); err == nil && stat.IsDir() {
 		dockerfileExists := checkDockerfileExists(clientPath)
+		port := 3000 // Default React/frontend port
+
+		// Try to parse port from Dockerfile if it exists
+		if dockerfileExists {
+			if parsedPort, err := parseDockerfilePort(clientPath); err == nil {
+				port = parsedPort
+				log.Printf("📄 Extracted port %d from client Dockerfile", port)
+			} else {
+				log.Printf("⚠️  Could not parse port from client Dockerfile: %v, using default port %d", err, port)
+			}
+		}
+
 		services = append(services, ServiceConfig{
 			Name:             "client",
 			Path:             clientPath,
-			Port:             3000, // Default React/frontend port
+			Port:             port,
 			DockerfileExists: dockerfileExists,
 		})
-		log.Printf("✅ Found client service at: %s (Dockerfile: %v)", clientPath, dockerfileExists)
+		log.Printf("✅ Found client service at: %s (Dockerfile: %v, Port: %d)", clientPath, dockerfileExists, port)
 	}
-	
+
 	// Check for server directory
 	serverPath := filepath.Join(repoPath, "server")
 	if stat, err := os.Stat(serverPath); err == nil && stat.IsDir() {
 		dockerfileExists := checkDockerfileExists(serverPath)
+		port := 5000 // Default backend port
+
+		// Try to parse port from Dockerfile if it exists
+		if dockerfileExists {
+			if parsedPort, err := parseDockerfilePort(serverPath); err == nil {
+				port = parsedPort
+				log.Printf("📄 Extracted port %d from server Dockerfile", port)
+			} else {
+				log.Printf("⚠️  Could not parse port from server Dockerfile: %v, using default port %d", err, port)
+			}
+		}
+
 		services = append(services, ServiceConfig{
 			Name:             "server",
 			Path:             serverPath,
-			Port:             5000, // Default backend port
+			Port:             port,
 			DockerfileExists: dockerfileExists,
 		})
-		log.Printf("✅ Found server service at: %s (Dockerfile: %v)", serverPath, dockerfileExists)
+		log.Printf("✅ Found server service at: %s (Dockerfile: %v, Port: %d)", serverPath, dockerfileExists, port)
 	}
-	
+
 	// Check for root-level service (fallback)
 	if len(services) == 0 {
 		if hasNodeProject(repoPath) {
 			dockerfileExists := checkDockerfileExists(repoPath)
+			port := 3000 // Default port
+
+			// Try to parse port from Dockerfile if it exists
+			if dockerfileExists {
+				if parsedPort, err := parseDockerfilePort(repoPath); err == nil {
+					port = parsedPort
+					log.Printf("📄 Extracted port %d from root Dockerfile", port)
+				} else {
+					log.Printf("⚠️  Could not parse port from root Dockerfile: %v, using default port %d", err, port)
+				}
+			}
+
 			services = append(services, ServiceConfig{
 				Name:             "app",
 				Path:             repoPath,
-				Port:             3000,
+				Port:             port,
 				DockerfileExists: dockerfileExists,
 			})
 			if dockerfileExists {
-				log.Printf("✅ Found root-level project with MCP-generated Dockerfile")
+				log.Printf("✅ Found root-level project with MCP-generated Dockerfile (Port: %d)", port)
 			} else {
 				log.Printf("⚠️  Found root-level project but no Dockerfile - needs nexlayer_generate_dockerfile")
 			}
 		}
 	}
-	
+
 	return services
 }
 
@@ -169,6 +206,47 @@ func checkDockerfileExists(dir string) bool {
 	dockerfilePath := filepath.Join(dir, "Dockerfile")
 	_, err := os.Stat(dockerfilePath)
 	return err == nil
+}
+
+// parseDockerfilePort extracts the exposed port from a Dockerfile
+func parseDockerfilePort(dir string) (int, error) {
+	dockerfilePath := filepath.Join(dir, "Dockerfile")
+	content, err := os.ReadFile(dockerfilePath)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read Dockerfile: %v", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		// Trim whitespace and convert to uppercase for case-insensitive matching
+		trimmedLine := strings.TrimSpace(strings.ToUpper(line))
+
+		// Look for EXPOSE directive
+		if strings.HasPrefix(trimmedLine, "EXPOSE") {
+			// Extract port number from EXPOSE directive
+			parts := strings.Fields(trimmedLine)
+			if len(parts) >= 2 {
+				portStr := parts[1]
+				// Handle cases like "EXPOSE 3000" or "EXPOSE 3000/tcp"
+				if strings.Contains(portStr, "/") {
+					portStr = strings.Split(portStr, "/")[0]
+				}
+
+				port, err := strconv.Atoi(portStr)
+				if err != nil {
+					return 0, fmt.Errorf("invalid port number in EXPOSE directive: %s", portStr)
+				}
+
+				if port < 1 || port > 65535 {
+					return 0, fmt.Errorf("port number out of range: %d", port)
+				}
+
+				return port, nil
+			}
+		}
+	}
+
+	return 0, fmt.Errorf("no EXPOSE directive found in Dockerfile")
 }
 
 // hasNodeProject checks if a directory contains a Node.js project
@@ -183,17 +261,17 @@ func buildAndPushImages(ctx context.Context, client *dagger.Client, repoPath str
 	result := BuildResult{
 		Ports: make(map[string]int),
 	}
-	
+
 	// Generate unique identifier for this build
 	buildID := strings.ToLower(uuid.New().String()[:8])
-	
+
 	for _, service := range services {
 		log.Printf("🔨 Building %s service...", service.Name)
-		
+
 		// Set up the container
 		var container *dagger.Container
 		var err error
-		
+
 		if service.DockerfileExists {
 			// Use existing Dockerfile (generated by MCP)
 			log.Printf("📄 Using Dockerfile for %s (generated by MCP)", service.Name)
@@ -204,25 +282,25 @@ func buildAndPushImages(ctx context.Context, client *dagger.Client, repoPath str
 			result.Error = fmt.Sprintf("No Dockerfile found for %s. Please use nexlayer_generate_dockerfile first to create optimized Dockerfile", service.Name)
 			return result
 		}
-		
+
 		if err != nil {
 			result.Error = fmt.Sprintf("Failed to build %s: %v", service.Name, err)
 			return result
 		}
-		
+
 		// Generate image URL for ttl.sh
 		imageURL := fmt.Sprintf("ttl.sh/%s-%s:1h", service.Name, buildID)
 		log.Printf("📤 Pushing %s to %s", service.Name, imageURL)
-		
+
 		// Push to registry
 		publishedURL, err := container.Publish(ctx, imageURL)
 		if err != nil {
 			result.Error = fmt.Sprintf("Failed to push %s: %v", service.Name, err)
 			return result
 		}
-		
+
 		log.Printf("✅ Successfully pushed %s: %s", service.Name, publishedURL)
-		
+
 		// Store results
 		result.Ports[service.Name] = service.Port
 		switch service.Name {
@@ -237,7 +315,7 @@ func buildAndPushImages(ctx context.Context, client *dagger.Client, repoPath str
 			}
 		}
 	}
-	
+
 	return result
 }
 
@@ -245,16 +323,14 @@ func buildAndPushImages(ctx context.Context, client *dagger.Client, repoPath str
 func buildWithDockerfile(ctx context.Context, client *dagger.Client, servicePath string) (*dagger.Container, error) {
 	// Mount the service directory
 	sourceDir := client.Host().Directory(servicePath)
-	
+
 	// Build using the existing Dockerfile with linux/amd64 platform
 	container := client.Container(dagger.ContainerOpts{
 		Platform: dagger.Platform("linux/amd64"), // Force linux/amd64 for Nexlayer compatibility
 	}).Build(sourceDir)
-	
+
 	return container, nil
 }
-
-
 
 // outputResult outputs the final result as JSON to stdout
 func outputResult(result BuildResult) {
@@ -264,44 +340,43 @@ func outputResult(result BuildResult) {
 		fmt.Println(`{"error": "Failed to marshal result"}`)
 		return
 	}
-	
+
 	fmt.Println(string(jsonBytes))
 }
 
 // Generate DAG summary for LLM analysis
 func generateDAGSummary(services []ServiceConfig) string {
 	summary := fmt.Sprintf("Build DAG for %d service(s):\n", len(services))
-	
+
 	for _, service := range services {
-		summary += fmt.Sprintf("- %s: Node.js service (port %d)", service.Name, service.Port)
 		if service.DockerfileExists {
-			summary += " [Custom Dockerfile]"
+			summary += fmt.Sprintf("- %s: Node.js service (port %d) [Dockerfile with EXPOSE %d]\n", service.Name, service.Port, service.Port)
 		} else {
-			summary += " [Auto-generated Dockerfile]"
+			summary += fmt.Sprintf("- %s: Node.js service (port %d) [Auto-generated Dockerfile]\n", service.Name, service.Port)
 		}
-		summary += "\n"
 	}
-	
+
 	summary += "\nBuild steps per service:\n"
-	summary += "1. Platform: linux/amd64 (Nexlayer compatibility)\n"
-	summary += "2. Use MCP-generated Dockerfile (nexlayer_generate_dockerfile)\n"
-	summary += "3. Build container from Dockerfile\n"
-	summary += "4. Push to ttl.sh registry\n"
-	summary += "5. Return image URLs for YAML generation\n"
-	
+	summary += "1. Parse Dockerfile EXPOSE directive for port detection\n"
+	summary += "2. Platform: linux/amd64 (Nexlayer compatibility)\n"
+	summary += "3. Use MCP-generated Dockerfile (nexlayer_generate_dockerfile)\n"
+	summary += "4. Build container from Dockerfile\n"
+	summary += "5. Push to ttl.sh registry\n"
+	summary += "6. Return image URLs with detected ports for YAML generation\n"
+
 	return summary
 }
 
 // Perform LLM DAG analysis and optimization
 func performLLMDAGAnalysis(ctx context.Context, repoPath string, services []ServiceConfig, provider string) string {
 	log.Printf("🤖 Starting LLM DAG analysis...")
-	
+
 	// Construct prompt for LLM
 	prompt := buildLLMPrompt(repoPath, services)
-	
+
 	// Call LLM API (mock implementation - replace with actual LLM integration)
 	response := mockLLMCall(prompt, provider)
-	
+
 	log.Printf("🤖 LLM analysis completed")
 	return response
 }
@@ -310,10 +385,10 @@ func performLLMDAGAnalysis(ctx context.Context, repoPath string, services []Serv
 func buildLLMPrompt(repoPath string, services []ServiceConfig) string {
 	prompt := "You are an expert DevOps engineer analyzing a Dagger build pipeline. "
 	prompt += "Based on the repository structure, suggest optimizations for the build process.\n\n"
-	
+
 	prompt += fmt.Sprintf("Repository: %s\n", repoPath)
 	prompt += fmt.Sprintf("Services found: %d\n\n", len(services))
-	
+
 	for _, service := range services {
 		prompt += fmt.Sprintf("Service: %s\n", service.Name)
 		prompt += fmt.Sprintf("- Type: Node.js application\n")
@@ -321,29 +396,29 @@ func buildLLMPrompt(repoPath string, services []ServiceConfig) string {
 		prompt += fmt.Sprintf("- Custom Dockerfile: %v\n", service.DockerfileExists)
 		prompt += "\n"
 	}
-	
+
 	prompt += "Current build workflow:\n"
 	prompt += "1. MCP generates optimized Dockerfile via nexlayer_generate_dockerfile\n"
 	prompt += "2. Dagger builds from MCP-generated Dockerfile (linux/amd64)\n"
 	prompt += "3. Push built image to ttl.sh registry\n"
 	prompt += "4. Return image URLs for nexlayer.yaml generation\n\n"
-	
+
 	prompt += "Please suggest optimizations for:\n"
 	prompt += "1. MCP Dockerfile generation improvements\n"
 	prompt += "2. Dagger build process enhancements\n"
 	prompt += "3. ttl.sh registry optimization\n"
 	prompt += "4. Nexlayer platform compatibility\n"
 	prompt += "5. Build performance and security\n\n"
-	
+
 	prompt += "Focus on optimizations that work within the MCP → Dagger → Nexlayer workflow."
-	
+
 	return prompt
 }
 
 // Mock LLM call (replace with actual LLM integration)
 func mockLLMCall(prompt string, provider string) string {
 	log.Printf("🤖 Calling %s LLM API...", provider)
-	
+
 	// This is a mock response - in production, this would call OpenAI, Anthropic, etc.
 	// Example of how to integrate:
 	// if provider == "openai" {
@@ -351,7 +426,7 @@ func mockLLMCall(prompt string, provider string) string {
 	// } else if provider == "anthropic" {
 	//     return callAnthropic(prompt)
 	// }
-	
+
 	// Mock intelligent response based on new MCP → Dagger → Nexlayer workflow
 	insights := "🧠 LLM Analysis Results:\n\n"
 	insights += "1. **Workflow**: ✅ Using MCP-generated Dockerfiles (no local image building)\n"
@@ -362,7 +437,7 @@ func mockLLMCall(prompt string, provider string) string {
 	insights += "6. **Security**: MCP-generated Dockerfiles should include non-root users\n"
 	insights += "7. **YAML Patching**: Image URLs properly integrated into nexlayer.yaml pods\n\n"
 	insights += "💡 This workflow ensures consistent, optimized builds that work seamlessly with Nexlayer"
-	
+
 	return insights
 }
 
@@ -374,7 +449,7 @@ func callOpenAI(prompt string) string {
 	if apiKey == "" {
 		return "OpenAI API key not configured"
 	}
-	
+
 	// Make API call to OpenAI
 	// ... implementation
 	return "OpenAI response"
@@ -386,7 +461,7 @@ func callAnthropic(prompt string) string {
 	if apiKey == "" {
 		return "Anthropic API key not configured"
 	}
-	
+
 	// Make API call to Anthropic
 	// ... implementation
 	return "Anthropic response"
